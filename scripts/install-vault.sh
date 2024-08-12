@@ -6,13 +6,7 @@ else
   helm repo update hashicorp
 fi
 
-kubectl get ns | grep 'vault' $>/dev/null
-if [ $? == 0 ]; then
-  echo "Vault ns is already there"
-else
-  kubectl create ns vault
-  helm upgrade --install vault hashicorp/vault --version 0.27.0 --namespace vault --values ../k8s/helm-vault-values.yml
-fi
+helm upgrade --install vault hashicorp/vault --version 0.28.0 --namespace vault --values ../k8s/helm-vault-values.yml --create-namespace
 
 
 isvaultrunning=$(kubectl get pods -n vault --field-selector=status.phase=Running)
@@ -30,9 +24,16 @@ VAULT_UNSEAL_KEY=$(cat cluster-keys.json | jq -r ".unseal_keys_b64[]")
 echo "⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰⏰"
 echo "PLEASE COPY PASTE THE FOLLOWING VALUE: $VAULT_UNSEAL_KEY, you will be asked for it 3 times to unseal the vaults"
 
+echo "Unsealing Vault 0"
 kubectl exec -it vault-0 -n vault  -- vault operator unseal $VAULT_UNSEAL_KEY
-kubectl exec -it vault-1 -n vault  -- vault operator unseal $VAULT_UNSEAL_KEY
-kubectl exec -it vault-2 -n vault  -- vault operator unseal $VAULT_UNSEAL_KEY
+
+echo "Joining & unsealing Vault 1"
+kubectl exec -it vault-1 -n vault -- vault operator raft join http://vault-0.vault-internal:8200
+kubectl exec -it vault-1 -n vault -- vault operator unseal $VAULT_UNSEAL_KEY
+
+echo "Joining & unsealing Vault 2"
+kubectl exec -it vault-2 -n vault -- vault operator raft join http://vault-0.vault-internal:8200
+kubectl exec -it vault-2 -n vault -- vault operator unseal $VAULT_UNSEAL_KEY
 
 echo "Obtaining root token"
 jq .root_token cluster-keys.json >commentedroottoken
@@ -51,6 +52,9 @@ kubectl exec vault-0 -n vault -- vault kv put secret/secret-challenge vaultpassw
 
 echo "Putting a challenge key in"
 kubectl exec vault-0 -n vault -- vault kv put secret/injected vaultinjected.value="$(openssl rand -base64 16)"
+
+echo "Putting a challenge key in"
+kubectl exec vault-0 -n vault -- vault kv put secret/codified challenge47secret.value="debugvalue"
 
 echo "Putting a subkey issue in"
 kubectl exec vault-0 -n vault -- vault kv put secret/wrongsecret aaaauser."$(openssl rand -base64 8)"="$(openssl rand -base64 16)"
@@ -87,6 +91,9 @@ path "secret/data/application" {
 path "secret/data/injected" {
   capabilities = ["read"]
 }
+path "secret/data/codified" {
+  capabilities = ["read"]
+}
 EOF'
 
 kubectl exec vault-0 -n vault -- /bin/sh -c 'vault policy write standard_sre - <<EOF
@@ -120,6 +127,7 @@ kubectl exec vault-0 -n vault -- vault write auth/kubernetes/role/secret-challen
   policies=secret-challenge \
   ttl=24h &&
   vault kv put secret/secret-challenge vaultpassword.password="$(openssl rand -base64 16)" &&
-  vault kv put secret/application vaultpassword.password="$(openssl rand -base64 16)"
+  vault kv put secret/application vaultpassword.password="$(openssl rand -base64 16)" &&
+  vault kv put secret/codified challenge47secret.value="debugvalue"
 
 kubectl create serviceaccount vault

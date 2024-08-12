@@ -41,6 +41,15 @@ else
   kubectl apply -f ../k8s/secrets-config.yml
 fi
 
+echo "Setting up the bitnami sealed secret controler"
+kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.27.0/controller.yaml
+kubectl apply -f ../k8s/sealed-secret-controller.yaml
+kubectl apply -f ../k8s/main.key
+kubectl delete pod -n kube-system -l name=sealed-secrets-controller
+kubectl create -f ../k8s/sealed-challenge48.json
+echo "finishing up the sealed secret controler part"
+echo "do you need to decrypt and/or handle things for the sealed secret use kubeseal"
+
 kubectl get secrets | grep 'funnystuff' &>/dev/null
 if [ $? == 0 ]; then
   echo "secrets secret is already installed"
@@ -49,15 +58,18 @@ else
   kubectl apply -f ../k8s/challenge33.yml
 fi
 
-kubectl get sa ebs-csi-controller-sa  -n kube-system | grep '1'  &>/dev/null
+helm list -n | grep 'aws-ebs-csi-driver' &> /dev/null
 if [ $? == 0 ]; then
-  echo "EBS CSI driver is installed, skipping (1 secret found)"
+  echo "AWS EBS CSI driver is already installed"
 else
-  echo "Installing the EBS CSI Driver from https://github.com/kubernetes-sigs/aws-ebs-csi-driver/blob/master/docs/install.md as AWS makes shit hard on us"
-  kubectl apply -k "github.com/kubernetes-sigs/aws-ebs-csi-driver/deploy/kubernetes/overlays/stable/?ref=release-1.25"
+  echo "Installing AWS EBS CSI driver"
+  helm repo add aws-ebs-csi-driver https://kubernetes-sigs.github.io/aws-ebs-csi-driver
+  helm repo update
+  helm upgrade --install aws-ebs-csi-driver --version 2.32.0 \
+    --namespace kube-system \
+    aws-ebs-csi-driver/aws-ebs-csi-driver \
+    --values ./k8s/ebs-csi-driver-values.yaml
 fi
-
-source ../scripts/install-consul.sh
 
 source ../scripts/install-vault.sh
 

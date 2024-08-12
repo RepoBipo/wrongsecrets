@@ -28,6 +28,15 @@ else
   kubectl apply -f ../k8s/secrets-config.yml
 fi
 
+echo "Setting up the bitnami sealed secret controler"
+kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.27.0/controller.yaml
+kubectl apply -f ../k8s/sealed-secret-controller.yaml
+kubectl apply -f ../k8s/main.key
+kubectl delete pod -n kube-system -l name=sealed-secrets-controller
+kubectl create -f ../k8s/sealed-challenge48.json
+echo "finishing up the sealed secret controler part"
+echo "do you need to decrypt and/or handle things for the sealed secret use kubeseal"
+
 kubectl get secrets | grep 'funnystuff' &>/dev/null
 if [ $? == 0 ]; then
   echo "secrets secret is already installed"
@@ -35,8 +44,6 @@ else
   kubectl apply -f ../k8s/secrets-secret.yml
   kubectl apply -f ../k8s/challenge33.yml
 fi
-
-source ../scripts/install-consul.sh
 
 source ../scripts/install-vault.sh
 
@@ -75,7 +82,7 @@ kubectl annotate serviceaccount \
   --namespace default default \
   "iam.gke.io/gcp-service-account=wrongsecrets-workload-sa@${GCP_PROJECT}.iam.gserviceaccount.com"
 
-envsubst <./k8s/secret-challenge-vault-deployment.yml.tpl >./k8s/secret-challenge-vault-deployment.yml
+envsubst '${GCP_PROJECT}' <./k8s/secret-challenge-vault-deployment.yml.tpl >./k8s/secret-challenge-vault-deployment.yml
 
 source ../scripts/apply-and-portforward.sh
 
